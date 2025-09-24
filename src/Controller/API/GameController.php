@@ -2,6 +2,7 @@
 
 namespace App\Controller\API;
 
+use App\Entity\Game;
 use App\Repository\GameRepository;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -15,6 +16,12 @@ final class GameController extends AbstractController
     {
         $games = $repo->findAll();
         return $this->json($games, JsonResponse::HTTP_OK);
+    }
+
+    #[Route('/games/{id}', name: 'api_game_detail', methods: ['GET'])]
+    public function getDetailGame(Game $game): JsonResponse
+    {
+        return $this->json($game, JsonResponse::HTTP_OK);
     }
     
 }
