@@ -5,6 +5,14 @@ on: [push, pull_request]
 jobs:
   phpunit:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mariadb:10.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bibliotheque-vr
+        ports:
+          - 3306:3306
     steps:
       - uses: actions/checkout@v3
       - name: Setup PHP
@@ -15,5 +23,7 @@ jobs:
           coverage: none
       - name: Install dependencies
         run: composer install --no-progress --prefer-dist --optimize-autoloader
+      - name: Préparer la BDD test
+        run: composer bdd-reset:test
       - name: Run PHPUnit
         run: php bin/phpunit
