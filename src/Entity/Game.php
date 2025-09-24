@@ -43,7 +43,7 @@ class Game
     private ?string $studio = null;
 
     #[ORM\Column(length: 255, nullable: true)]
-    #[Assert\Url(message: "L'image doit être une URL valide.")]
+    #[Assert\Url(requireTld:false, message: "L'image doit être une URL valide.")]
     private ?string $picture = null;
 
     public function getId(): ?int
