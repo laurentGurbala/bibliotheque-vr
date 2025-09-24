@@ -4,6 +4,7 @@ namespace App\Controller\API;
 
 use App\Entity\Game;
 use App\Repository\GameRepository;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -23,5 +24,13 @@ final class GameController extends AbstractController
     {
         return $this->json($game, JsonResponse::HTTP_OK);
     }
-    
+
+    #[Route('/games/{id}', name: 'api_game_delete', methods: ['DELETE'])]
+    public function delete(Game $game, EntityManagerInterface $em): JsonResponse
+    {
+        $em->remove($game);
+        $em->flush();
+        
+        return $this->json(null, JsonResponse::HTTP_NO_CONTENT);
+    }
 }
