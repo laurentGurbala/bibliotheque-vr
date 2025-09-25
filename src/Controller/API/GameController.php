@@ -9,6 +9,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\SerializerInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
@@ -30,6 +31,7 @@ final class GameController extends AbstractController
     }
 
     #[Route('', name: 'api_games_create', methods: ['POST'])]
+    #[IsGranted('ROLE_ADMIN', message: "Vous n'avez pas les droits suffisants pour créer un jeu.")]
     public function create(
         Request $request,
         SerializerInterface $serializer,
@@ -61,6 +63,7 @@ final class GameController extends AbstractController
     }
 
     #[Route('/{id}', name: 'api_game_update', methods: ['PUT'])]
+    #[IsGranted('ROLE_ADMIN', message: "Vous n'avez pas les droits suffisants pour modifier un jeu.")]
     public function update(
         Game $game, 
         Request $request, 
@@ -94,6 +97,7 @@ final class GameController extends AbstractController
     }
 
     #[Route('/{id}', name: 'api_game_delete', methods: ['DELETE'])]
+    #[IsGranted('ROLE_ADMIN', message: "Vous n'avez pas les droits suffisants pour supprimer un jeu.")]
     public function delete(Game $game, EntityManagerInterface $em): JsonResponse
     {
         $em->remove($game);
