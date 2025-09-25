@@ -18,9 +18,14 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 final class GameController extends AbstractController
 {
     #[Route('', name: 'api_games', methods: ['GET'])]
-    public function list(GameRepository $repo): JsonResponse
+    public function getAll(
+        GameRepository $repo,
+        Request $request
+    ): JsonResponse
     {
-        $games = $repo->findAll();
+        $page = $request->get('page', 1);
+        $limit = $request->get('limit', 10);
+        $games = $repo->findAllWithPagination($page, $limit);
         return $this->json($games, JsonResponse::HTTP_OK);
     }
 
