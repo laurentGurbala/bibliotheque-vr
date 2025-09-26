@@ -23,7 +23,14 @@ jobs:
           coverage: none
       - name: Install dependencies
         run: composer install --no-progress --prefer-dist --optimize-autoloader
+      - name: Generate JWT keys
+        run: |
+          mkdir -p config/jwt
+          openssl genrsa -out config/jwt/private.pem -aes256 -passout pass:${{ secrets.JWT_PASSPHRASE }} 4096
+          openssl rsa -pubout -in config/jwt/private.pem -passin pass:${{ secrets.JWT_PASSPHRASE }} -out config/jwt/public.pem
       - name: Préparer la BDD test
         run: composer bdd-reset:test
       - name: Run PHPUnit
+        env:
+          JWT_PASSPHRASE: ${{ secrets.JWT_PASSPHRASE }}
         run: php bin/phpunit
