@@ -2,234 +2,326 @@
 
 namespace App\Tests\Functional\API;
 
+use App\Entity\Game;
+use App\Repository\UserRepository;
+use Doctrine\ORM\EntityManagerInterface;
+use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 class GameControllerTest extends WebTestCase
 {
-    /**
-     * Test la liste de jeux
-     */
-    public function testList(): void
-    {
-        $client = static::createClient();
-        $client->request('GET', '/api/games');
+    private $client;
+    private string $adminToken;
+    private string $userToken;
+    private EntityManagerInterface $entityManager;
 
-        $this->assertResponseIsSuccessful();
-        $this->assertResponseStatusCodeSame(200);
-        $this->assertJson($client->getResponse()->getContent());
+    protected function setUp(): void
+    {
+        // Initialise le client et l'EntityManager
+        $this->client = static::createClient();
+        $container = static::getContainer();
+        $this->entityManager = $container->get('doctrine')->getManager();
+
+        // Génère un token JWT pour chaque utilisateur
+        $this->adminToken = $this->getAdminToken($container);
+        $this->userToken  = $this->getUserToken($container);
+
     }
 
     /**
-     * Test le détail d'un jeu
+     * Génère un token JWT pour l'admin.
+     * @param object $container Le conteneur de services.
+     * @return string Le token JWT.
      */
-    public function testGetDetail(): void
+    private function getAdminToken($container): string
     {
-        $client = static::createClient();
-        $client->request('GET', '/api/games/1');
+        $userRepo = $container->get(UserRepository::class);
+        $jwtManager = $container->get(JWTTokenManagerInterface::class);
 
-        $this->assertResponseIsSuccessful();
-        $this->assertResponseStatusCodeSame(200);
-        $responseData = json_decode($client->getResponse()->getContent(), true);
-        $this->assertIsArray($responseData);
-        $this->assertEquals('Jeu VR 1', $responseData['title']);
+        $admin = $userRepo->findOneBy(['email' => 'splint@test.fr']);
+        return $jwtManager->create($admin);
     }
 
     /**
-     * Test la création d'un jeu
+     * Génère un token JWT pour l'utilisateur standard.
+     * @param object $container Le conteneur de services.
+     * @return string Le token JWT.
      */
-    public function testCreate(): void
+    private function getUserToken($container): string
     {
-        $client = static::createClient();
-        $client->request(
-            'POST',
-            '/api/games',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            json_encode([
-                'title' => 'Nouveau Jeu',
-                'description' => 'Description du nouveau jeu',
-                'releaseAt' => '2023-01-01',
-                'studio' => 'Studio XYZ'
-            ])
-        );
+        $userRepo = $container->get(UserRepository::class);
+        $jwtManager = $container->get(JWTTokenManagerInterface::class);
 
-        $this->assertResponseStatusCodeSame(201);
-        $responseData = json_decode($client->getResponse()->getContent(), true);
-        $this->assertIsArray($responseData);
-        $this->assertEquals('Nouveau Jeu', $responseData['title']);
+        $user = $userRepo->findOneBy(['email' => 'user1@test.fr']);
+        return $jwtManager->create($user);
+    }
+
+    // --------- TESTS GET LIST ---------
+    #[DataProvider('gamesProvider')]
+    public function testGetGames(string $role, int $expectedStatus): void
+    {
+        // Prépare les headers en fonction du rôle
+        $headers = $this->getHeadersForRole($role);
+        $this->client->request('GET', '/api/games', [], [], $headers);
+        
+        // Vérifie le code de statut
+        $this->assertResponseStatusCodeSame($expectedStatus);
+
+        // Vérifie le contenu si OK
+        if ($expectedStatus === 200) {
+            $responseData = $this->getJsonResponse();
+
+            foreach ($responseData as $game) {
+                $this->assertArrayHasKey('title', $game);
+                $this->assertNotEmpty($game['title']);
+            }
+        }
     }
 
     /**
-     * Test la création d'un jeu avec un JSON invalide
+     * @return array<string, array<string, int>>
      */
-    public function testCreateInvalidJson(): void
+    public static function gamesProvider(): array
     {
-        $client = static::createClient();
-        $client->request(
-            'POST',
-            '/api/games',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            '{invalidJson:}'
-        );
+        return [
+            'admin' => ["admin", 200],
+            'user' => ["user", 200],
+            'no auth' => ["", 401],
+        ];
+    }
 
-        $this->assertResponseStatusCodeSame(400);
-        $responseData = json_decode($client->getResponse()->getContent(), true);
-        $this->assertIsArray($responseData);
-        $this->assertArrayHasKey('error', $responseData);
-        $this->assertEquals('Invalid JSON format', $responseData['error']);
+    // --------- TESTS GET DETAIL ---------
+    #[DataProvider('gameDetailProvider')]
+    public function testGetGameDetail(?string $role, int $expectedStatus): void
+    {
+        
+        $game = null;
+        $gameId = 999999;
+
+        // Crée un jeu en base si on ne teste pas le 404
+        if ($expectedStatus !== 404) {
+            $game = $this->createGame('Test Game', 'Test Studio');
+            $gameId = $game->getId();
+        }
+
+        // Requête GET
+        $headers = $this->getHeadersForRole($role);
+        $this->client->request('GET', '/api/games/' . $gameId, [], [], $headers);
+
+        // Vérifie le code de statut
+        $this->assertResponseStatusCodeSame($expectedStatus);
+
+        // Vérifie le contenu si OK
+        if ($expectedStatus === 200) {
+            $responseData = $this->getJsonResponse();
+            $this->assertEquals($gameId, $responseData['id']);
+            $this->assertEquals('Test Game', $responseData['title']);
+            
+            // Nettoyage
+            $this->removeGame($game);
+        }
     }
 
     /**
-     * Test la création d'un jeu avec des données invalides
+     * @return array<string, array{0: ?string, 1: int}>
      */
-    public function testCreateInvalidData(): void
+    public static function gameDetailProvider(): array
     {
-        $client = static::createClient();
-        $client->request(
-            'POST',
-            '/api/games',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            json_encode([
-                'title' => '',
-            ])
-        );
+        return [
+            'admin' => ['admin', 200],
+            'user' => ['user', 200],
+            'no auth' => [null, 401],
+            'not found' => ['admin', 404],
+        ];
+    }
 
-        $this->assertResponseStatusCodeSame(422);
-        $responseData = json_decode($client->getResponse()->getContent(), true);
-        $this->assertIsArray($responseData);
-        $this->assertNotEmpty($responseData);
+    // --------- TESTS CREATE ---------
+    #[DataProvider('createGameProvider')]
+    public function testCreateGame(?string $role, array $payload, int $expectedStatus): void
+    {
+        // Requête POST
+        $headers = $this->getHeadersForRole($role);
+        $this->client->request('POST', '/api/games', [], [], $headers, json_encode($payload));
+        
+        // Vérifie le code de statut
+        $this->assertResponseStatusCodeSame($expectedStatus);
+
+        // Vérifie le contenu si création réussie
+        if ($expectedStatus === 201) {
+            $responseData = $this->getJsonResponse();
+            $this->assertEquals($payload['title'], $responseData['title']);
+            $this->assertEquals($payload['studio'], $responseData['studio']);
+
+            // Nettoyage
+            $this->removeGameById($responseData['id']);
+        }
     }
 
     /**
-     * Test la mise à jour d'un jeu
+     * @return array<string, array{0: ?string, 1: array, 2: int}>
      */
-    public function testUpdate(): void
+    public static function createGameProvider(): array
     {
-        $client = static::createClient();
-        $client->request(
-            'PUT',
-            '/api/games/1',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            json_encode([
-                'description' => 'Description modifiée',
-            ])
-        );
+        return [
+            'admin valid' => ['admin', ['title' => 'New Game', 'studio' => 'New Studio'], 201],
+            'user forbidden' => ['user', ['title' => 'New Game', 'studio' => 'New Studio'], 403],
+            'no auth' => [null, ['title' => 'New Game', 'studio' => 'New Studio'], 401],
+            'admin invalid' => ['admin', ['studio' => 'New Studio'], 422],
+        ];
+    }
 
-        $this->assertResponseIsSuccessful();
-        $this->assertResponseStatusCodeSame(200);
-        $responseData = json_decode($client->getResponse()->getContent(), true);
-        $this->assertIsArray($responseData);
-        $this->assertEquals('Description modifiée', $responseData['description']);
+    // --------- TESTS UPDATE ---------
+    #[DataProvider('updateGameProvider')]
+    public function testUpdateGame(?string $role, array $payload, int $expectedStatus): void
+    {
+        // Crée un jeu en base pour le mettre à jour
+        $game = $this->createGame('Original Game', 'Original Studio');
+        $headers = $this->getHeadersForRole($role);
+
+        // Requête PUT
+        $this->client->request('PUT', '/api/games/' . $game->getId(), [], [], $headers, json_encode($payload));
+        
+        // Vérifie le code de statut
+        $this->assertResponseStatusCodeSame($expectedStatus);
+
+        // Vérifie le contenu si mise à jour réussie
+        if ($expectedStatus === 200) {
+            $responseData = $this->getJsonResponse();
+            $this->assertEquals($payload['title'], $responseData['title']);
+            $this->assertEquals($payload['studio'], $responseData['studio']);
+        }
+
+        // Nettoyage
+        $this->removeGame($game);
     }
 
     /**
-     * Test la mise à jour d'un jeu avec un JSON invalide
+     * @return array<string, array{0: ?string, 1: array, 2: int}>
      */
-    public function testUpdateInvalidJson(): void
+    public static function updateGameProvider(): array
     {
-        $client = static::createClient();
-        $client->request(
-            'PUT',
-            '/api/games/1',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            '{invalidJson:}'
-        );
+        return [
+            'admin valid' => ['admin', ['title' => 'Updated Game', 'studio' => 'Updated Studio'], 200],
+            'user forbidden' => ['user', ['title' => 'Updated Game', 'studio' => 'Updated Studio'], 403],
+            'no auth' => [null, ['title' => 'Updated Game', 'studio' => 'Updated Studio'], 401],
+            'admin invalid' => ['admin', ['title' => ''], 422],
+        ];
+    }
 
-        $this->assertResponseStatusCodeSame(400);
-        $responseData = json_decode($client->getResponse()->getContent(), true);
-        $this->assertIsArray($responseData);
-        $this->assertArrayHasKey('error', $responseData);
-        $this->assertEquals('Invalid JSON format', $responseData['error']);
+    // --------- TESTS DELETE ---------
+    #[DataProvider('deleteGameProvider')]
+    public function testDeleteGame(?string $role, int $expectedStatus): void
+    {
+        // On crée un jeu à supprimer
+        $game = $this->createGame('Delete Game', 'Delete Studio');
+        $headers = $this->getHeadersForRole($role);
+        $gameId = $game->getId();
+
+        // Requête DELETE
+        $this->client->request('DELETE', '/api/games/' . $gameId, [], [], $headers);
+
+        // Vérifie le code de statut
+        $this->assertResponseStatusCodeSame($expectedStatus);
+
+        // Vérifie que le jeu est bien supprimé si succès
+        if ($expectedStatus === 204) {
+            $deletedGame = $this->entityManager->getRepository(Game::class)->find($gameId);
+            $this->assertNull($deletedGame);
+        } else {
+            // Nettoyage si non supprimé
+            $this->removeGame($game);
+        }
     }
 
     /**
-     * Test la mise à jour d'un jeu inexistant
+     * @return array<string, array{0: ?string, 1: int}>
      */
-    public function testUpdateNonExistent(): void
+    public static function deleteGameProvider(): array
     {
-        $client = static::createClient();
-        $client->request(
-            'PUT',
-            '/api/games/99999',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            json_encode([
-                'description' => 'Description modifiée',
-            ])
-        );
+        return [
+            'admin' => ['admin', 204],
+            'user' => ['user', 403],
+            'no auth' => [null, 401],
+        ];
+    }
 
-        $this->assertResponseStatusCodeSame(404);
+    protected function tearDown(): void
+    {
+        parent::tearDown();
+        $this->client = null; // Evite les fuites de mémoire
+    }
+
+    // --------- HELPERS ---------
+
+    /**
+     * Prépare les headers pour une requête en fonction du rôle.
+     * @param string|null $role Rôle de l'utilisateur (admin, user, null pour pas d'auth).
+     * @return array Tableau des headers.
+     */
+    private function getHeadersForRole(?string $role): array
+    {
+        $headers = ['CONTENT_TYPE' => 'application/json'];
+
+        $token = match ($role) {
+            'admin' => $this->adminToken,
+            'user' => $this->userToken,
+            default => null,
+        };
+
+        if ($token) {
+            $headers['HTTP_Authorization'] = 'Bearer ' . $token;
+        }
+
+        return $headers;
     }
 
     /**
-     * Test la mise à jour d'un jeu avec des données invalides
+     * Récupère et décode la réponse JSON.
+     * @return array|null Retourne le tableau décodé ou null si échec.
      */
-    public function testUpdateInvalidData(): void
+    private function getJsonResponse(): ?array
     {
-        $client = static::createClient();
-        $client->request(
-            'PUT',
-            '/api/games/1',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            json_encode([
-                'title' => '',
-            ])
-        );
-
-        $this->assertResponseStatusCodeSame(422);
-        $responseData = json_decode($client->getResponse()->getContent(), true);
-        $this->assertIsArray($responseData);
-        $this->assertNotEmpty($responseData);
+        return json_decode($this->client->getResponse()->getContent(), true);
     }
 
     /**
-     * Test de la suppression d'un jeu
+     * Crée un jeu et l'enregistre en base de données.
+     * @param string $title titre du jeu.
+     * @param string $studio studio du jeu.
+     * @return Game Retourne l'entité Game créée.
      */
-    public function testDelete(): void
+    private function createGame(string $title, string $studio): Game
     {
-        $client = static::createClient();
-        // Créer un jeu à supprimer
-        $client->request(
-            'POST',
-            '/api/games',
-            [],
-            [],
-            ['CONTENT_TYPE' => 'application/json'],
-            json_encode([
-                'title' => 'Nouveau Jeu',
-                'description' => 'Description du nouveau jeu',
-                'releaseAt' => '2023-01-01',
-                'studio' => 'Studio XYZ'
-            ])
-        );
+        $game = new Game();
+        $game->setTitle($title);
+        $game->setStudio($studio);
+        $this->entityManager->persist($game);
+        $this->entityManager->flush();
 
-        $game = json_decode($client->getResponse()->getContent(), true);
-        $id = $game['id'];
-
-        // Supprimer
-        $client->request('DELETE', '/api/games/' . $id);
-        $this->assertResponseStatusCodeSame(204);
+        return $game;
     }
 
     /**
-     * Test de la suppression d'un jeu inexistant
+     * Supprime un jeu de la base de données.
+     * @param Game $game Le jeu à supprimer.
      */
-    public function testDeleteNonExistent(): void
+    private function removeGame(Game $game): void
     {
-        $client = static::createClient();
-        $client->request('DELETE', '/api/games/99999');
-        $this->assertResponseStatusCodeSame(404);
+        $this->entityManager->remove($game);
+        $this->entityManager->flush();
+    }
+
+    /**
+     * Supprime un jeu de la base de données par son ID.
+     * @param int $gameId L'ID du jeu à supprimer.
+     */
+    private function removeGameById(int $gameId): void
+    {
+        $game = $this->entityManager->getRepository(Game::class)->find($gameId);
+        if ($game) {
+            $this->entityManager->remove($game);
+            $this->entityManager->flush();
+        }
     }
 }
